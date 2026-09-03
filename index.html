@@ -565,6 +565,54 @@
     color:var(--muted);
     font-size:13.5px;
   }
+
+  .stats-row{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .stat-pill{
+    font-size:11px;
+    font-weight:600;
+    padding:9px 14px;
+    border-radius:10px;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:2px;
+    text-transform:uppercase;
+    letter-spacing:0.02em;
+  }
+  .stat-pill .num{
+    font-size:19px;
+    font-family:'Oswald',sans-serif;
+    font-weight:700;
+    text-transform:none;
+    letter-spacing:0;
+  }
+  .stat-entrada{ background:rgba(31,138,112,0.1); color:#1F8A70; }
+  .stat-salida{ background:rgba(228,33,42,0.08); color:#B81A22; }
+  .stat-neutral{ background:var(--paper); color:var(--black); border:1px solid var(--line); }
+
+  .mios-list{ display:flex; flex-direction:column; gap:12px; }
+  .mio-card{
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px;
+    background:#FAFAF9;
+  }
+  .mio-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .mio-datetime{ font-size:12.5px; color:var(--muted); }
+  .mio-photo{
+    width:100%;
+    max-height:260px;
+    object-fit:cover;
+    border-radius:9px;
+    margin-top:8px;
+    cursor:pointer;
+    display:block;
+  }
   .loading{
     text-align:center;
     padding:20px;
@@ -695,6 +743,7 @@
     </div>
     <div class="tabs" id="tabsRow">
       <div class="tab active" data-tab="registrar">Registrar</div>
+      <div class="tab" data-tab="mios" id="miosTabBtn" style="display:none;">Mis registros</div>
       <div class="tab" data-tab="admin" id="adminTabBtn" style="display:none;">Panel de revisión</div>
     </div>
   </header>
@@ -719,7 +768,18 @@
             Marcar salida
           </button>
         </div>
-        <div class="hint">Al marcar, tomas o subes una foto con marca de agua (nombre, tipo y hora). Para la salida deberás indicar una novedad. El registro queda disponible para revisión.</div>
+        <div class="hint">Al marcar, se toma una foto en el momento con marca de agua (nombre, tipo y hora). Para la salida deberás indicar una novedad. El registro queda disponible para revisión.</div>
+      </div>
+    </section>
+
+    <!-- MIS REGISTROS TAB (worker + admin) -->
+    <section id="tab-mios" style="display:none;">
+      <div class="card">
+        <div class="section-title">Mis registros</div>
+        <div class="hint" style="margin-top:2px;">Historial de tus marcaciones de los últimos 30 días. Solo lectura.</div>
+        <div id="miosWrap" style="margin-top:10px;">
+          <div class="loading">Cargando…</div>
+        </div>
       </div>
     </section>
 
@@ -728,12 +788,14 @@
 
       <div class="subtabs">
         <div class="subtab active" data-subtab="registros">Registros</div>
+        <div class="subtab" data-subtab="resumen">Resumen</div>
         <div class="subtab" data-subtab="usuarios">Usuarios</div>
       </div>
 
       <!-- REGISTROS -->
       <div id="subtab-registros" class="card">
         <div class="section-title">Registros del equipo</div>
+        <div class="stats-row" id="statsBar"></div>
         <div class="toolbar" style="margin-top:12px;">
           <input type="text" id="filterName" placeholder="Filtrar por nombre">
           <input type="date" id="filterDate">
@@ -746,6 +808,26 @@
           <div class="loading">Cargando registros…</div>
         </div>
       </div>
+
+      <!-- RESUMEN -->
+      <div id="subtab-resumen" class="card" style="display:none;">
+        <div class="section-title">Resumen por trabajador</div>
+        <div class="toolbar" style="margin-top:12px;">
+          <select id="resumenName"><option value="">Todos los trabajadores</option></select>
+        </div>
+        <div class="toolbar" style="margin-top:8px;">
+          <input type="date" id="resumenFrom">
+          <input type="date" id="resumenTo">
+        </div>
+        <div class="toolbar" style="margin-top:8px;">
+          <button class="btn-export" id="btnResumenRefresh">↻ Actualizar</button>
+        </div>
+        <div class="stats-row" id="resumenStats"></div>
+        <div id="resumenWrap" style="margin-top:10px;">
+          <div class="loading">Cargando…</div>
+        </div>
+      </div>
+
 
       <!-- USUARIOS -->
       <div id="subtab-usuarios" class="card" style="display:none;">
@@ -799,11 +881,9 @@
 
     <div id="camArea">
       <div class="capture-choice" id="captureChoice">
-        <button id="btnUseCamera">📷<br>Usar cámara</button>
-        <button id="btnUseUpload">🖼️<br>Subir foto</button>
+        <button id="btnUseCamera" style="flex:1;">📷<br>Usar cámara</button>
       </div>
     </div>
-    <input type="file" id="fileInput" accept="image/*" style="display:none;">
     <canvas id="camCanvas" style="display:none;"></canvas>
 
     <div class="modal-actions" id="camActionsLive" style="display:none;">
@@ -818,6 +898,7 @@
 
 <!-- Lightbox -->
 <div class="lightbox" id="lightbox">
+  <a id="lightboxDownload" href="#" download="foto.jpg" style="position:absolute; top:16px; right:16px; z-index:2; background:rgba(255,255,255,0.15); color:#fff; padding:9px 15px; border-radius:9px; font-size:13px; font-weight:700; text-decoration:none; font-family:'Inter',sans-serif;">⬇ Descargar foto</a>
   <img id="lightboxImg" src="">
 </div>
 
@@ -957,6 +1038,7 @@
     $('appScreen').style.display = 'block';
     $('sessionUserName').textContent = currentUser.name;
     $('adminTabBtn').style.display = currentUser.profile === 'ADMINISTRADOR' ? 'block' : 'none';
+    $('miosTabBtn').style.display = 'block';
   });
 
   $('loginPass').addEventListener('keydown', (e) => {
@@ -973,10 +1055,24 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelector('.tab[data-tab="registrar"]').classList.add('active');
     $('tab-registrar').style.display = 'block';
+    $('tab-mios').style.display = 'none';
     $('tab-admin').style.display = 'none';
   });
 
   initLogin();
+
+  function todayLocalISODate(){
+    const d = new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  $('filterDate').value = todayLocalISODate();
+  (function setResumenDefaults(){
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 29);
+    $('resumenTo').value = todayLocalISODate();
+    $('resumenFrom').value = `${from.getFullYear()}-${pad(from.getMonth()+1)}-${pad(from.getDate())}`;
+  })();
 
   // ================= TABS =================
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
@@ -984,8 +1080,10 @@
     t.classList.add('active');
     const which = t.dataset.tab;
     $('tab-registrar').style.display = which === 'registrar' ? 'block' : 'none';
+    $('tab-mios').style.display = which === 'mios' ? 'block' : 'none';
     $('tab-admin').style.display = which === 'admin' ? 'block' : 'none';
     if(which === 'admin'){ loadRecords(); refreshUsersPanel(); }
+    if(which === 'mios'){ loadMyRecords(); }
   }));
 
   document.querySelectorAll('.subtab').forEach(t => t.addEventListener('click', () => {
@@ -993,7 +1091,9 @@
     t.classList.add('active');
     const which = t.dataset.subtab;
     $('subtab-registros').style.display = which === 'registros' ? 'block' : 'none';
+    $('subtab-resumen').style.display = which === 'resumen' ? 'block' : 'none';
     $('subtab-usuarios').style.display = which === 'usuarios' ? 'block' : 'none';
+    if(which === 'resumen'){ populateResumenNames(); loadResumen(); }
   }));
 
   // ================= LIVE CLOCK =================
@@ -1012,6 +1112,7 @@
   let capturedAt = null;
   let selectedNovedad = null;
   let selectedNovedadTexto = '';
+  let overwriteDocId = null; // set when today's entry of this type already exists
 
   const camModal = $('camModal');
   const camVideo = document.createElement('video');
@@ -1024,6 +1125,43 @@
   const novedadBox = $('novedadBox');
   const novedadTextWrap = $('novedadTextWrap');
   const novedadTexto = $('novedadTexto');
+
+  function todayRangeBounds(){
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    return { start, end };
+  }
+
+  // Looks for an existing entry of this type, for this worker, already marked today.
+  async function findTodayEntry(type){
+    try{
+      const { start, end } = todayRangeBounds();
+      const snap = await db.collection('entries').where('userId', '==', currentUser.id).get();
+      const matches = snap.docs
+        .map(d => Object.assign({ id: d.id }, d.data()))
+        .filter(r => r.type === type && new Date(r.timestamp) >= start && new Date(r.timestamp) <= end);
+      if(matches.length === 0) return null;
+      matches.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return matches[0];
+    }catch(e){
+      return null; // if the check fails, don't block the worker from marking
+    }
+  }
+
+  async function handleMarkClick(type){
+    const existing = await findTodayEntry(type);
+    if(existing){
+      const horaExistente = timeOnly(existing.timestamp);
+      const label = type === 'entrada' ? 'ENTRADA' : 'SALIDA';
+      const seguir = confirm(`Ya marcaste tu ${label} de hoy a las ${horaExistente}.\n\nSi continúas, ese registro se reemplazará por uno nuevo.\n\n¿Deseas continuar?`);
+      if(!seguir) return;
+      overwriteDocId = existing.id;
+    }else{
+      overwriteDocId = null;
+    }
+    openCapture(type);
+  }
 
   function openCapture(type){
     currentType = type;
@@ -1059,12 +1197,13 @@
 
   function closeCapture(){
     stopStream();
+    overwriteDocId = null;
     camModal.classList.remove('open');
   }
 
   $('camClose').addEventListener('click', closeCapture);
-  $('btnEntrada').addEventListener('click', () => openCapture('entrada'));
-  $('btnSalida').addEventListener('click', () => openCapture('salida'));
+  $('btnEntrada').addEventListener('click', () => handleMarkClick('entrada'));
+  $('btnSalida').addEventListener('click', () => handleMarkClick('salida'));
 
   // novedad option selection
   document.querySelectorAll('.novedad-opt').forEach(opt => {
@@ -1109,7 +1248,7 @@
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
       camVideo.srcObject = mediaStream;
     }catch(e){
-      $('camArea').innerHTML = '<div class="cam-error">No se pudo acceder a la cámara (permiso denegado o no disponible). Usa la opción "Subir foto" en su lugar.</div>';
+      $('camArea').innerHTML = '<div class="cam-error">No se pudo acceder a la cámara. Revisa los permisos del navegador (Configuración → Permisos del sitio → Cámara) e inténtalo de nuevo.</div>';
       camActionsLive.style.display = 'none';
       setTimeout(() => { resetToChoice(); }, 2600);
     }
@@ -1128,35 +1267,6 @@
     ctx.setTransform(1,0,0,1,0,0);
     finalizeCapture(ctx, w, h);
     stopStream();
-  });
-
-  // -- upload path --
-  $('btnUseUpload').addEventListener('click', () => {
-    if(!novedadReady()){
-      toast('Selecciona la novedad de salida antes de continuar.');
-      return;
-    }
-    $('fileInput').click();
-  });
-
-  $('fileInput').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    const img = new Image();
-    img.onload = () => {
-      const maxW = 480;
-      const scale = Math.min(1, maxW / img.width);
-      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-      camCanvas.width = w; camCanvas.height = h;
-      const ctx = camCanvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      finalizeCapture(ctx, w, h);
-    };
-    img.onerror = () => toast('No se pudo leer la imagen seleccionada.');
-    const reader = new FileReader();
-    reader.onload = (ev) => { img.src = ev.target.result; };
-    reader.readAsDataURL(file);
-    e.target.value = '';
   });
 
   function finalizeCapture(ctx, w, h){
@@ -1222,7 +1332,12 @@
         record.novedadTipo = selectedNovedad;
         record.novedadDetalle = selectedNovedad === 'Novedad' ? selectedNovedadTexto : '';
       }
-      await db.collection('entries').add(record);
+      if(overwriteDocId){
+        await db.collection('entries').doc(overwriteDocId).set(record);
+      }else{
+        await db.collection('entries').add(record);
+      }
+      overwriteDocId = null;
       storageOK = true;
       $('previewBanner').style.display = 'none';
       toast(`Registro guardado: ${currentType === 'entrada' ? 'Entrada' : 'Salida'} de ${currentUser.name}`);
@@ -1252,6 +1367,58 @@
     }
   }
 
+  // ---- Mis registros (worker's own history, last 30 days, read-only) ----
+  async function loadMyRecords(){
+    const wrap = $('miosWrap');
+    wrap.innerHTML = '<div class="loading">Cargando…</div>';
+    try{
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const snap = await db.collection('entries').where('userId', '==', currentUser.id).get();
+      let records = snap.docs.map(d => d.data());
+      records = records.filter(r => new Date(r.timestamp) >= cutoff);
+      records.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+      if(records.length === 0){
+        wrap.innerHTML = '<div class="empty-state">No tienes registros en los últimos 30 días.</div>';
+        return;
+      }
+
+      let html = '<div class="mios-list">';
+      records.forEach((r, i) => {
+        const d = new Date(r.timestamp);
+        const dateStr = d.toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit',year:'numeric'});
+        const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        const pillClass = r.type === 'entrada' ? 'pill-entrada' : 'pill-salida';
+        let nove = '';
+        if(r.type === 'salida' && r.novedadTipo){
+          nove = r.novedadTipo === 'Novedad' ? ('Novedad: ' + (r.novedadDetalle||'')) : r.novedadTipo;
+        }
+        html += `<div class="mio-card">
+          <div class="mio-head">
+            <span class="type-pill ${pillClass}">${r.type === 'entrada' ? 'Entrada' : 'Salida'}</span>
+            <span class="mio-datetime mono">${dateStr} · ${timeStr}</span>
+          </div>
+          ${nove ? `<div class="novedad-note" style="margin:4px 0 8px;">${escapeHtml(nove)}</div>` : ''}
+          <img class="mio-photo" src="${r.photo}" data-idx="${i}" alt="Foto del registro">
+        </div>`;
+      });
+      html += '</div>';
+      wrap.innerHTML = html;
+
+      wrap.querySelectorAll('.mio-photo').forEach((img, i) => {
+        img.addEventListener('click', () => {
+          const r = records[i];
+          const d = new Date(r.timestamp);
+          const fname = `${r.type}_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.jpg`;
+          openLightbox(img.src, fname);
+        });
+      });
+    }catch(e){
+      wrap.innerHTML = '<div class="empty-state">No se pudieron cargar tus registros. Verifica la conexión.</div>';
+    }
+  }
+
   function renderRecords(){
     const wrap = $('recordsWrap');
     const nameFilter = $('filterName').value.trim().toLowerCase();
@@ -1266,6 +1433,13 @@
       }
       return true;
     });
+
+    const entradasCount = filtered.filter(r => r.type === 'entrada').length;
+    const salidasCount = filtered.filter(r => r.type === 'salida').length;
+    $('statsBar').innerHTML = `
+      <div class="stat-pill stat-entrada"><span class="num">${entradasCount}</span>Entradas</div>
+      <div class="stat-pill stat-salida"><span class="num">${salidasCount}</span>Salidas</div>
+    `;
 
     if(filtered.length === 0){
       wrap.innerHTML = '<div class="empty-state">No hay registros que coincidan.</div>';
@@ -1295,16 +1469,31 @@
     html += '</tbody></table>';
     wrap.innerHTML = html;
 
-    wrap.querySelectorAll('.thumb').forEach(img => {
+    wrap.querySelectorAll('.thumb').forEach((img, i) => {
       img.addEventListener('click', () => {
-        $('lightboxImg').src = img.src;
-        $('lightbox').classList.add('open');
+        const r = filtered[i];
+        const d = new Date(r.timestamp);
+        const fname = `${r.type}_${escapeFileName(r.name)}_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.jpg`;
+        openLightbox(img.src, fname);
       });
     });
 
     wrap._filtered = filtered;
   }
 
+  function escapeFileName(s){
+    return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_');
+  }
+
+  function openLightbox(src, filename){
+    $('lightboxImg').src = src;
+    const dl = $('lightboxDownload');
+    dl.href = src;
+    dl.setAttribute('download', filename || 'foto.jpg');
+    $('lightbox').classList.add('open');
+  }
+
+  $('lightboxDownload').addEventListener('click', (e) => { e.stopPropagation(); });
   $('lightbox').addEventListener('click', () => $('lightbox').classList.remove('open'));
   $('filterName').addEventListener('input', renderRecords);
   $('filterDate').addEventListener('change', renderRecords);
@@ -1340,6 +1529,148 @@
     const fname = `asistencia_arancel_${today.getFullYear()}${pad(today.getMonth()+1)}${pad(today.getDate())}.xlsx`;
     XLSX.writeFile(wb, fname);
   });
+
+  // ================= ADMIN: RESUMEN =================
+  function timeOnly(iso){
+    const d = new Date(iso);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function populateResumenNames(){
+    const sel = $('resumenName');
+    const current = sel.value;
+    const names = Array.from(new Set(usersCache.map(u => u.name))).sort((a,b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">Todos los trabajadores</option>' +
+      names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if(names.includes(current)) sel.value = current;
+  }
+
+  async function loadResumen(){
+    const wrap = $('resumenWrap');
+    const statsEl = $('resumenStats');
+    wrap.innerHTML = '<div class="loading">Cargando…</div>';
+    statsEl.innerHTML = '';
+
+    try{
+      if(!allRecords || allRecords.length === 0){
+        const snap = await db.collection('entries').get();
+        allRecords = snap.docs.map(d => Object.assign({ _key: d.id }, d.data()));
+      }
+
+      const nameFilter = $('resumenName').value;
+      const fromStr = $('resumenFrom').value;
+      const toStr = $('resumenTo').value;
+
+      let recs = allRecords.slice();
+      if(nameFilter) recs = recs.filter(r => r.name === nameFilter);
+      if(fromStr){
+        const from = new Date(fromStr + 'T00:00:00');
+        recs = recs.filter(r => new Date(r.timestamp) >= from);
+      }
+      if(toStr){
+        const to = new Date(toStr + 'T23:59:59');
+        recs = recs.filter(r => new Date(r.timestamp) <= to);
+      }
+
+      // Group by worker + calendar day
+      const groups = {};
+      recs.forEach(r => {
+        const d = new Date(r.timestamp);
+        const dateKey = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+        const key = r.name + '|' + dateKey;
+        if(!groups[key]){
+          groups[key] = {
+            name: r.name,
+            dateKey: dateKey,
+            dateObj: new Date(d.getFullYear(), d.getMonth(), d.getDate()),
+            entrada: null,
+            salida: null,
+            novedad: ''
+          };
+        }
+        if(r.type === 'entrada'){
+          if(!groups[key].entrada || new Date(r.timestamp) < new Date(groups[key].entrada)){
+            groups[key].entrada = r.timestamp;
+          }
+        }else{
+          if(!groups[key].salida || new Date(r.timestamp) > new Date(groups[key].salida)){
+            groups[key].salida = r.timestamp;
+          }
+          if(r.novedadTipo){
+            groups[key].novedad = r.novedadTipo === 'Novedad' ? ('Novedad: ' + (r.novedadDetalle||'')) : r.novedadTipo;
+          }
+        }
+      });
+
+      let rows = Object.values(groups).sort((a,b) => b.dateObj - a.dateObj || a.name.localeCompare(b.name));
+
+      if(rows.length === 0){
+        wrap.innerHTML = '<div class="empty-state">No hay registros que coincidan.</div>';
+        return;
+      }
+
+      let totalHoras = 0;
+      let diasConHoras = 0;
+
+      let html = '<table class="records"><thead><tr><th>Trabajador</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Novedad</th></tr></thead><tbody>';
+      rows.forEach(g => {
+        const dateStr = g.dateObj.toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit',year:'numeric'});
+        const entradaStr = g.entrada ? timeOnly(g.entrada) : '—';
+        const salidaStr = g.salida ? timeOnly(g.salida) : '—';
+        let horasStr = '—';
+        if(g.entrada && g.salida){
+          const diffH = (new Date(g.salida) - new Date(g.entrada)) / 3600000;
+          if(diffH > 0){
+            horasStr = diffH.toFixed(1) + ' h';
+            totalHoras += diffH;
+            diasConHoras++;
+          }
+        }
+        html += `<tr>
+          <td>${escapeHtml(g.name)}</td>
+          <td>${dateStr}</td>
+          <td class="mono">${entradaStr}</td>
+          <td class="mono">${salidaStr}</td>
+          <td class="mono">${horasStr}</td>
+          <td class="novedad-note">${escapeHtml(g.novedad)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+
+      const promedio = diasConHoras > 0 ? (totalHoras / diasConHoras) : 0;
+      const todosMode = !nameFilter;
+
+      if(todosMode){
+        const dateWorkerSets = {};
+        rows.forEach(g => {
+          if(!dateWorkerSets[g.dateKey]) dateWorkerSets[g.dateKey] = new Set();
+          dateWorkerSets[g.dateKey].add(g.name);
+        });
+        const distinctDates = Object.keys(dateWorkerSets);
+        const totalWorkerDayEntries = distinctDates.reduce((sum, dk) => sum + dateWorkerSets[dk].size, 0);
+        const avgWorkersPerDay = distinctDates.length > 0 ? (totalWorkerDayEntries / distinctDates.length) : 0;
+        statsEl.innerHTML = `
+          <div class="stat-pill stat-neutral"><span class="num">${avgWorkersPerDay.toFixed(1)}</span>Prom. trabajadores/día</div>
+          <div class="stat-pill stat-neutral"><span class="num">${totalHoras.toFixed(1)}h</span>Total horas</div>
+          <div class="stat-pill stat-neutral"><span class="num">${promedio.toFixed(1)}h</span>Promedio/día</div>
+        `;
+      }else{
+        statsEl.innerHTML = `
+          <div class="stat-pill stat-neutral"><span class="num">${diasConHoras}</span>Días trabajados</div>
+          <div class="stat-pill stat-neutral"><span class="num">${totalHoras.toFixed(1)}h</span>Total horas</div>
+          <div class="stat-pill stat-neutral"><span class="num">${promedio.toFixed(1)}h</span>Promedio/día</div>
+        `;
+      }
+    }catch(e){
+      wrap.innerHTML = '<div class="empty-state">No se pudo generar el resumen. Verifica la conexión.</div>';
+    }
+  }
+
+  $('resumenName').addEventListener('change', loadResumen);
+  $('resumenFrom').addEventListener('change', loadResumen);
+  $('resumenTo').addEventListener('change', loadResumen);
+  $('btnResumenRefresh').addEventListener('click', () => { loadRecords(); loadResumen(); });
 
   // ================= ADMIN: USERS =================
   async function refreshUsersPanel(){
