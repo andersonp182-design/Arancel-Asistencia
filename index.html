@@ -844,6 +844,8 @@
           <button class="btn-add-user" id="btnAddUser">+ Agregar usuario</button>
         </div>
 
+        <button class="btn-export" id="btnMergeDup" style="width:100%; justify-content:center; margin-top:12px; background:var(--amber); color:#2A1D06; display:none;">🔧 Buscar y fusionar duplicados</button>
+
         <div class="section-title" style="margin-top:18px;">Usuarios activos</div>
         <div id="activeUsersWrap"><div class="loading">Cargando…</div></div>
 
@@ -943,8 +945,14 @@
     {name:"FABIAN ALBERTO ACOSTA VIGOYA", password:"9126", profile:"TRABAJADOR"}
   ];
 
+  function slugifyName(name){
+    return (name||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  }
+
   // Load all users from Firestore. If the collection is empty (first run),
-  // seed it once with the initial team list.
+  // seed it once with the initial team list. Seed docs use a fixed, name-based
+  // ID so that even if two devices trigger the seed at the same time, they
+  // write to the same documents instead of creating duplicates.
   async function loadUsers(){
     try{
       const snap = await db.collection('users').get();
@@ -957,9 +965,10 @@
       const batch = db.batch();
       const seeded = [];
       SEED_USERS.forEach(u => {
-        const ref = db.collection('users').doc();
+        const id = 'seed_' + slugifyName(u.name);
+        const ref = db.collection('users').doc(id);
         batch.set(ref, { name:u.name, password:u.password, profile:u.profile, active:true });
-        seeded.push(Object.assign({ id: ref.id }, u, { active:true }));
+        seeded.push(Object.assign({ id }, u, { active:true }));
       });
       await batch.commit();
       return seeded;
@@ -970,8 +979,16 @@
     }
   }
 
-  async function addUserDoc(user){
+  async function addUserDoc(user, skipDupCheck){
     try{
+      if(!skipDupCheck){
+        const nameNorm = user.name.trim().toUpperCase();
+        const dup = usersCache.find(u => u.name.trim().toUpperCase() === nameNorm);
+        if(dup){
+          const seguir = confirm(`Ya existe un usuario llamado "${user.name}".\n\nSi continúas, vas a crear un duplicado y eso puede mezclar registros entre los dos. ¿Quieres continuar de todas formas?`);
+          if(!seguir) return null;
+        }
+      }
       const ref = await db.collection('users').add({
         name:user.name, password:user.password, profile:user.profile, active:true
       });
@@ -979,6 +996,62 @@
     }catch(e){
       toast('No se pudo guardar. Revisa la conexión o las reglas de Firestore.');
       return null;
+    }
+  }
+
+  // One-click cleanup: finds users sharing the same name, keeps whichever
+  // has the most attendance history, moves any entries from the others onto
+  // that one, then deletes the extra duplicate profiles.
+  async function findAndMergeDuplicates(){
+    const groups = {};
+    usersCache.forEach(u => {
+      const key = u.name.trim().toUpperCase();
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(u);
+    });
+    const dupGroups = Object.values(groups).filter(g => g.length > 1);
+    if(dupGroups.length === 0){
+      toast('No se encontraron usuarios duplicados.');
+      return;
+    }
+    const nombres = dupGroups.map(g => g[0].name).join(', ');
+    if(!confirm(`Se encontraron duplicados de: ${nombres}.\n\nSe unirá el historial de cada grupo en un solo usuario y se eliminarán las copias extra. Esto no se puede deshacer. ¿Continuar?`)) return;
+
+    const btn = $('btnMergeDup');
+    if(btn){ btn.disabled = true; btn.textContent = 'Fusionando…'; }
+
+    try{
+      let mergedCount = 0;
+      for(const group of dupGroups){
+        const counts = {};
+        for(const u of group){
+          const snap = await db.collection('entries').where('userId', '==', u.id).get();
+          counts[u.id] = snap.size;
+        }
+        let canonical = group[0];
+        group.forEach(u => { if((counts[u.id]||0) > (counts[canonical.id]||0)) canonical = u; });
+
+        for(const u of group){
+          if(u.id === canonical.id) continue;
+          const snap = await db.collection('entries').where('userId', '==', u.id).get();
+          if(!snap.empty){
+            const batch = db.batch();
+            snap.docs.forEach(doc => batch.update(doc.ref, { userId: canonical.id, name: canonical.name }));
+            await batch.commit();
+          }
+          await db.collection('users').doc(u.id).delete();
+          mergedCount++;
+        }
+      }
+      toast(`Se fusionaron ${mergedCount} usuario(s) duplicado(s). Su historial quedó unido.`);
+      usersCache = await loadUsers();
+      renderUsers();
+      initLogin();
+      loadRecords();
+    }catch(e){
+      toast('Ocurrió un error al fusionar. Verifica la conexión e intenta de nuevo.');
+    }finally{
+      if(btn){ btn.disabled = false; btn.textContent = '🔧 Buscar y fusionar duplicados'; }
     }
   }
 
@@ -1682,6 +1755,15 @@
     const active = usersCache.filter(u => u.active).sort((a,b)=>a.name.localeCompare(b.name));
     const inactive = usersCache.filter(u => !u.active).sort((a,b)=>a.name.localeCompare(b.name));
 
+    // Only show the merge tool if there are actually duplicate names.
+    const nameCounts = {};
+    usersCache.forEach(u => {
+      const key = u.name.trim().toUpperCase();
+      nameCounts[key] = (nameCounts[key]||0) + 1;
+    });
+    const hasDuplicates = Object.values(nameCounts).some(c => c > 1);
+    $('btnMergeDup').style.display = hasDuplicates ? 'flex' : 'none';
+
     const activeWrap = $('activeUsersWrap');
     if(active.length === 0){
       activeWrap.innerHTML = '<div class="empty-state">No hay usuarios activos.</div>';
@@ -1748,6 +1830,8 @@
     w.style.display = showing ? 'none' : 'block';
     $('toggleInactive').textContent = showing ? 'Ver usuarios eliminados' : 'Ocultar usuarios eliminados';
   });
+
+  $('btnMergeDup').addEventListener('click', findAndMergeDuplicates);
 
   $('btnAddUser').addEventListener('click', async () => {
     const name = $('newUserName').value.trim();
