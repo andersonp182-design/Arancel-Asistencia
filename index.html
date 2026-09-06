@@ -1002,6 +1002,13 @@
   // One-click cleanup: finds users sharing the same name, keeps whichever
   // has the most attendance history, moves any entries from the others onto
   // that one, then deletes the extra duplicate profiles.
+  function withTimeout(promise, ms, label){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado (' + label + ')')), ms))
+    ]);
+  }
+
   async function findAndMergeDuplicates(){
     const groups = {};
     usersCache.forEach(u => {
@@ -1025,7 +1032,10 @@
       for(const group of dupGroups){
         const counts = {};
         for(const u of group){
-          const snap = await db.collection('entries').where('userId', '==', u.id).get();
+          const snap = await withTimeout(
+            db.collection('entries').where('userId', '==', u.id).get(),
+            15000, 'consultando registros de ' + u.name
+          );
           counts[u.id] = snap.size;
         }
         let canonical = group[0];
@@ -1033,23 +1043,28 @@
 
         for(const u of group){
           if(u.id === canonical.id) continue;
-          const snap = await db.collection('entries').where('userId', '==', u.id).get();
+          const snap = await withTimeout(
+            db.collection('entries').where('userId', '==', u.id).get(),
+            15000, 'consultando registros de ' + u.name
+          );
           if(!snap.empty){
             const batch = db.batch();
             snap.docs.forEach(doc => batch.update(doc.ref, { userId: canonical.id, name: canonical.name }));
-            await batch.commit();
+            await withTimeout(batch.commit(), 15000, 'moviendo registros de ' + u.name);
           }
-          await db.collection('users').doc(u.id).delete();
+          await withTimeout(db.collection('users').doc(u.id).delete(), 15000, 'eliminando duplicado de ' + u.name);
           mergedCount++;
+          if(btn){ btn.textContent = `Fusionando… (${mergedCount})`; }
         }
       }
       toast(`Se fusionaron ${mergedCount} usuario(s) duplicado(s). Su historial quedó unido.`);
-      usersCache = await loadUsers();
+      usersCache = await withTimeout(loadUsers(), 15000, 'recargando usuarios');
       renderUsers();
       initLogin();
       loadRecords();
     }catch(e){
-      toast('Ocurrió un error al fusionar. Verifica la conexión e intenta de nuevo.');
+      console.error('Error al fusionar duplicados:', e);
+      toast('No se pudo completar la fusión: ' + (e && e.message ? e.message : 'error desconocido') + '. Verifica tu conexión e inténtalo de nuevo.', 5000);
     }finally{
       if(btn){ btn.disabled = false; btn.textContent = '🔧 Buscar y fusionar duplicados'; }
     }
